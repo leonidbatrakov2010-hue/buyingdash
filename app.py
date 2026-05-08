@@ -7,11 +7,9 @@ from functools import wraps
 
 app = Flask(__name__)
 
-# ── Config ────────────────────────────────────────────────────────────────────
 DATA_FILE = Path("reports_data.json")
 API_SECRET = os.getenv("API_SECRET", "buyingteam2024")
 
-# ── Storage helpers ────────────────────────────────────────────────────────────
 def load_all_reports():
     if not DATA_FILE.exists():
         return []
@@ -32,14 +30,12 @@ def require_secret(f):
         return f(*args, **kwargs)
     return decorated
 
-# ── API endpoints ──────────────────────────────────────────────────────────────
 @app.route("/api/report", methods=["POST"])
 @require_secret
 def receive_report():
     data = request.get_json()
     if not data:
         return jsonify({"error": "No data"}), 400
-
     reports = load_all_reports()
     data["received_at"] = datetime.now().isoformat()
     reports.append(data)
@@ -66,620 +62,368 @@ def get_reports():
 def health():
     return jsonify({"status": "ok"})
 
-# ── Dashboard HTML ─────────────────────────────────────────────────────────────
-DASHBOARD_HTML = """<!DOCTYPE html>
+HTML = r"""<!DOCTYPE html>
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Buying Dashboard</title>
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
 <style>
-:root {
-  --bg: #080810;
-  --s1: #0f0f1a;
-  --s2: #161625;
-  --s3: #1e1e30;
-  --border: #252540;
-  --accent: #6c63ff;
-  --accent2: #ff6584;
-  --accent3: #43e97b;
-  --yellow: #f9ca24;
-  --text: #e8e8f4;
-  --muted: #5a5a7a;
-  --font: 'Syne', sans-serif;
-  --mono: 'DM Mono', monospace;
-}
-* { margin:0; padding:0; box-sizing:border-box; }
-html { scroll-behavior: smooth; }
-body { background:var(--bg); color:var(--text); font-family:var(--font); min-height:100vh; overflow-x:hidden; }
-
-/* Background grid */
-body::before {
-  content:''; position:fixed; inset:0; pointer-events:none; z-index:0;
-  background-image: linear-gradient(rgba(108,99,255,0.03) 1px, transparent 1px),
-                    linear-gradient(90deg, rgba(108,99,255,0.03) 1px, transparent 1px);
-  background-size: 40px 40px;
-}
-
-.wrap { position:relative; z-index:1; max-width:1440px; margin:0 auto; padding:32px 24px; }
-
-/* Header */
-header {
-  display:flex; align-items:center; justify-content:space-between;
-  padding:20px 32px; margin-bottom:40px;
-  background:var(--s1); border:1px solid var(--border); border-radius:16px;
-  backdrop-filter:blur(10px);
-}
-.logo { font-size:22px; font-weight:800; letter-spacing:-0.5px; }
-.logo span { color:var(--accent); }
-.logo-sub { font-family:var(--mono); font-size:11px; color:var(--muted); margin-top:3px; }
-.header-right { display:flex; align-items:center; gap:16px; }
-.live-dot { width:8px; height:8px; background:var(--accent3); border-radius:50%; animation:pulse 2s infinite; }
-@keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.5;transform:scale(1.3)} }
-.last-update { font-family:var(--mono); font-size:11px; color:var(--muted); }
-
-/* Period filter */
-.period-bar {
-  display:flex; gap:8px; margin-bottom:32px; flex-wrap:wrap; align-items:center;
-}
-.period-btn {
-  font-family:var(--mono); font-size:12px; padding:8px 18px;
-  background:var(--s1); border:1px solid var(--border); color:var(--muted);
-  border-radius:8px; cursor:pointer; transition:all 0.2s;
-}
-.period-btn:hover { border-color:var(--accent); color:var(--text); }
-.period-btn.active { background:var(--accent); border-color:var(--accent); color:#fff; }
-.refresh-btn {
-  margin-left:auto; font-family:var(--mono); font-size:12px; padding:8px 18px;
-  background:transparent; border:1px solid var(--border); color:var(--muted);
-  border-radius:8px; cursor:pointer; transition:all 0.2s;
-}
-.refresh-btn:hover { border-color:var(--accent3); color:var(--accent3); }
-
-/* KPI strip */
-.kpi-strip { display:grid; grid-template-columns:repeat(6,1fr); gap:12px; margin-bottom:32px; }
-.kpi-card {
-  background:var(--s1); border:1px solid var(--border); border-radius:12px;
-  padding:18px 20px; position:relative; overflow:hidden;
-  animation: fadeUp 0.4s ease both;
-}
-.kpi-card::after {
-  content:''; position:absolute; bottom:0; left:0; right:0; height:2px;
-  background:var(--accent-color, var(--accent));
-}
-.kpi-label { font-family:var(--mono); font-size:10px; color:var(--muted); text-transform:uppercase; letter-spacing:1px; margin-bottom:10px; }
-.kpi-value { font-size:28px; font-weight:800; line-height:1; }
-.kpi-sub { font-family:var(--mono); font-size:10px; color:var(--muted); margin-top:6px; }
-
-/* Charts row */
-.charts-row { display:grid; grid-template-columns:1fr 1fr 1fr; gap:16px; margin-bottom:32px; }
-.chart-card {
-  background:var(--s1); border:1px solid var(--border); border-radius:16px; padding:24px;
-  animation: fadeUp 0.5s ease both;
-}
-.chart-title { font-size:13px; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:1px; margin-bottom:20px; }
-.chart-wrap { position:relative; height:180px; }
-
-/* Buyer cards */
-.section-header {
-  display:flex; align-items:center; gap:16px; margin-bottom:20px; margin-top:36px;
-}
-.section-title { font-size:13px; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:2px; }
-.section-line { flex:1; height:1px; background:var(--border); }
-.section-count { font-family:var(--mono); font-size:11px; color:var(--muted); }
-
-.buyers-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(300px,1fr)); gap:16px; margin-bottom:8px; }
-.buyer-card {
-  background:var(--s1); border:1px solid var(--border); border-radius:16px; padding:24px;
-  transition:border-color 0.2s, transform 0.2s;
-  animation: fadeUp 0.4s ease both;
-}
-.buyer-card:hover { border-color:var(--accent); transform:translateY(-2px); }
-.buyer-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:16px; }
-.buyer-name { font-size:18px; font-weight:800; }
-.buyer-score {
-  font-family:var(--mono); font-size:12px; padding:4px 10px;
-  border-radius:6px; font-weight:600;
-}
-.score-good { background:rgba(67,233,123,0.15); color:var(--accent3); border:1px solid rgba(67,233,123,0.3); }
-.score-ok   { background:rgba(249,202,36,0.15); color:var(--yellow); border:1px solid rgba(249,202,36,0.3); }
-.score-bad  { background:rgba(255,101,132,0.15); color:var(--accent2); border:1px solid rgba(255,101,132,0.3); }
-.buyer-stats { display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; margin-bottom:16px; }
-.buyer-stat { background:var(--s2); border-radius:8px; padding:10px 12px; text-align:center; }
-.buyer-stat-val { font-size:16px; font-weight:700; }
-.buyer-stat-label { font-family:var(--mono); font-size:9px; color:var(--muted); margin-top:3px; }
-.buyer-channels { border-top:1px solid var(--border); padding-top:12px; }
-.buyer-channel-row {
-  display:flex; align-items:center; justify-content:space-between;
-  padding:6px 0; font-family:var(--mono); font-size:11px;
-  border-bottom:1px solid rgba(255,255,255,0.04);
-}
-.buyer-channel-row:last-child { border-bottom:none; }
-.ch-name { color:var(--text); }
-.ch-kpi { font-weight:600; }
-.kpi-g { color:var(--accent3); }
-.kpi-y { color:var(--yellow); }
-.kpi-r { color:var(--accent2); }
-
-/* Projects table */
-.table-wrap {
-  background:var(--s1); border:1px solid var(--border); border-radius:16px;
-  overflow:hidden; overflow-x:auto; margin-bottom:8px;
-  animation: fadeUp 0.5s ease both;
-}
-.table-filters { display:flex; gap:8px; padding:16px 20px; border-bottom:1px solid var(--border); flex-wrap:wrap; }
-.tfilter {
-  font-family:var(--mono); font-size:11px; padding:5px 12px;
-  background:var(--s2); border:1px solid var(--border); color:var(--muted);
-  border-radius:6px; cursor:pointer; transition:all 0.15s;
-}
-.tfilter:hover { border-color:var(--accent); color:var(--text); }
-.tfilter.active { background:var(--accent); border-color:var(--accent); color:#fff; }
-table { width:100%; border-collapse:collapse; }
-thead th {
-  background:var(--s2); padding:12px 16px; text-align:left;
-  font-family:var(--mono); font-size:10px; text-transform:uppercase;
-  letter-spacing:1px; color:var(--muted); white-space:nowrap;
-  border-bottom:1px solid var(--border); cursor:pointer;
-}
-thead th:hover { color:var(--text); }
-tbody tr { border-bottom:1px solid rgba(255,255,255,0.04); transition:background 0.15s; }
-tbody tr:hover { background:var(--s2); }
-tbody tr:last-child { border-bottom:none; }
-td { padding:12px 16px; font-family:var(--mono); font-size:12px; vertical-align:middle; }
-.num { text-align:right; }
-.tag {
-  display:inline-block; padding:2px 8px; border-radius:4px; font-size:10px; font-weight:600;
-  background:var(--s2); border:1px solid var(--border);
-}
-.tag-buyer { background:rgba(108,99,255,0.15); border-color:rgba(108,99,255,0.3); color:#a89ff9; }
-.tag-t1 { background:rgba(108,99,255,0.15); border-color:rgba(108,99,255,0.3); color:#a89ff9; }
-.tag-t2 { background:rgba(249,202,36,0.15); border-color:rgba(249,202,36,0.3); color:var(--yellow); }
-.tag-t3 { background:rgba(67,233,123,0.15); border-color:rgba(67,233,123,0.3); color:var(--accent3); }
-.tag-ru { background:rgba(255,101,132,0.15); border-color:rgba(255,101,132,0.3); color:var(--accent2); }
-.verdict {
-  display:inline-block; padding:3px 10px; border-radius:4px; font-size:10px; font-weight:700;
-  text-transform:uppercase; letter-spacing:0.5px;
-}
-.v-scale { background:rgba(67,233,123,0.2); color:var(--accent3); }
-.v-keep  { background:rgba(249,202,36,0.2); color:var(--yellow); }
-.v-cut   { background:rgba(255,101,132,0.2); color:var(--accent2); }
-.v-test  { background:rgba(108,99,255,0.2); color:#a89ff9; }
-.v-pause { background:rgba(90,90,122,0.3); color:var(--muted); }
-.date-cell { color:var(--muted); font-size:10px; }
-
-/* Empty state */
-.empty { text-align:center; padding:80px 20px; color:var(--muted); }
-.empty-icon { font-size:48px; margin-bottom:16px; }
-.empty-title { font-size:20px; font-weight:700; margin-bottom:8px; }
-.empty-sub { font-family:var(--mono); font-size:12px; }
-
-/* Animations */
-@keyframes fadeUp {
-  from { opacity:0; transform:translateY(16px); }
-  to   { opacity:1; transform:translateY(0); }
-}
-.kpi-card:nth-child(1){animation-delay:0.05s}
-.kpi-card:nth-child(2){animation-delay:0.1s}
-.kpi-card:nth-child(3){animation-delay:0.15s}
-.kpi-card:nth-child(4){animation-delay:0.2s}
-.kpi-card:nth-child(5){animation-delay:0.25s}
-.kpi-card:nth-child(6){animation-delay:0.3s}
-
-/* Loading */
-.loading { text-align:center; padding:60px; color:var(--muted); font-family:var(--mono); font-size:13px; }
-.spinner { width:32px; height:32px; border:2px solid var(--border); border-top-color:var(--accent); border-radius:50%; animation:spin 0.8s linear infinite; margin:0 auto 16px; }
-@keyframes spin { to { transform:rotate(360deg); } }
-
-@media(max-width:768px) {
-  .kpi-strip { grid-template-columns:repeat(3,1fr); }
-  .charts-row { grid-template-columns:1fr; }
-  .wrap { padding:16px; }
-}
+:root{--bg:#07070f;--s1:#0e0e1c;--s2:#151528;--s3:#1c1c35;--border:#222240;--accent:#6c63ff;--accent2:#ff6584;--green:#43e97b;--yellow:#f9ca24;--red:#ff6b6b;--blue:#4ecdc4;--text:#e8e8f4;--muted:#5a5a7a;--font:'Syne',sans-serif;--mono:'DM Mono',monospace}
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:var(--bg);color:var(--text);font-family:var(--font);min-height:100vh;display:flex;flex-direction:column}
+body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;background-image:linear-gradient(rgba(108,99,255,.02) 1px,transparent 1px),linear-gradient(90deg,rgba(108,99,255,.02) 1px,transparent 1px);background-size:48px 48px}
+.header{position:sticky;top:0;z-index:100;background:rgba(7,7,15,.92);backdrop-filter:blur(20px);border-bottom:1px solid var(--border);padding:0 28px;height:60px;display:flex;align-items:center;justify-content:space-between}
+.logo{font-size:19px;font-weight:800;letter-spacing:-.5px}.logo span{color:var(--accent)}
+.logo-sub{font-family:var(--mono);font-size:10px;color:var(--muted);margin-top:2px}
+.live{display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:11px;color:var(--muted)}
+.live-dot{width:7px;height:7px;background:var(--green);border-radius:50%;animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+.btn{font-family:var(--mono);font-size:11px;padding:7px 16px;background:transparent;border:1px solid var(--border);color:var(--muted);border-radius:8px;cursor:pointer;transition:all .2s}
+.btn:hover{border-color:var(--accent);color:var(--accent)}
+.layout{display:flex;flex:1;position:relative;z-index:1}
+.sidebar{width:250px;flex-shrink:0;background:var(--s1);border-right:1px solid var(--border);padding:20px 14px;position:sticky;top:60px;height:calc(100vh - 60px);overflow-y:auto}
+.period-row{display:flex;gap:5px;margin-bottom:22px}
+.pBtn{flex:1;font-family:var(--mono);font-size:11px;padding:6px 0;background:var(--s2);border:1px solid var(--border);color:var(--muted);border-radius:7px;cursor:pointer;transition:all .15s;text-align:center}
+.pBtn:hover{border-color:var(--accent);color:var(--text)}
+.pBtn.active{background:var(--accent);border-color:var(--accent);color:#fff}
+.sb-section{margin-bottom:22px}
+.sb-label{font-family:var(--mono);font-size:9px;text-transform:uppercase;letter-spacing:1.5px;color:var(--muted);margin-bottom:8px;padding:0 6px}
+.fBtn{display:block;width:100%;text-align:left;font-family:var(--mono);font-size:12px;padding:7px 10px;background:transparent;border:1px solid transparent;color:var(--muted);border-radius:7px;cursor:pointer;transition:all .15s;margin-bottom:3px}
+.fBtn:hover{background:var(--s2);color:var(--text)}
+.fBtn.active{background:rgba(108,99,255,.15);border-color:rgba(108,99,255,.35);color:#a89ff9}
+.fCnt{float:right;background:var(--s3);border-radius:3px;padding:1px 5px;font-size:10px;color:var(--muted)}
+.main{flex:1;padding:24px 28px;overflow-x:hidden}
+.kpi-strip{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:22px}
+.kpi-card{background:var(--s1);border:1px solid var(--border);border-radius:11px;padding:14px 18px;position:relative;overflow:hidden}
+.kpi-card::after{content:'';position:absolute;bottom:0;left:0;right:0;height:2px;background:var(--c,var(--accent))}
+.kpi-l{font-family:var(--mono);font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:7px}
+.kpi-v{font-size:24px;font-weight:800;line-height:1}
+.kpi-s{font-family:var(--mono);font-size:10px;color:var(--muted);margin-top:4px}
+.flags{background:rgba(255,107,107,.07);border:1px solid rgba(255,107,107,.22);border-radius:11px;padding:14px 18px;margin-bottom:20px;display:none}
+.flags.on{display:block}
+.flags-t{font-family:var(--mono);font-size:10px;color:var(--red);text-transform:uppercase;letter-spacing:1px;margin-bottom:9px}
+.flag-i{font-family:var(--mono);font-size:12px;color:var(--text);padding:4px 0;border-bottom:1px solid rgba(255,107,107,.1)}
+.flag-i:last-child{border-bottom:none}
+.sec-hdr{display:flex;align-items:center;gap:10px;margin-bottom:14px;margin-top:6px}
+.sec-t{font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:2px;white-space:nowrap}
+.sec-l{flex:1;height:1px;background:var(--border)}
+.sec-c{font-family:var(--mono);font-size:11px;color:var(--muted);white-space:nowrap}
+.cards{display:flex;flex-direction:column;gap:14px}
+.card{background:var(--s1);border:1px solid var(--border);border-radius:15px;overflow:hidden;transition:border-color .2s}
+.card:hover{border-color:rgba(108,99,255,.4)}
+.card-hdr{display:flex;align-items:center;gap:14px;padding:18px 22px;cursor:pointer;user-select:none}
+.verdict{flex-shrink:0;font-family:var(--mono);font-size:11px;font-weight:700;padding:4px 11px;border-radius:6px;text-transform:uppercase;letter-spacing:.5px}
+.v-scale{background:rgba(67,233,123,.2);color:var(--green)}
+.v-keep{background:rgba(249,202,36,.2);color:var(--yellow)}
+.v-cut{background:rgba(255,107,107,.2);color:var(--red)}
+.v-test{background:rgba(108,99,255,.2);color:#a89ff9}
+.v-pause{background:rgba(90,90,122,.2);color:var(--muted)}
+.card-meta{flex:1}
+.card-name{font-size:15px;font-weight:700;margin-bottom:4px}
+.card-tags{display:flex;gap:5px;flex-wrap:wrap}
+.tag{font-family:var(--mono);font-size:10px;padding:2px 7px;border-radius:4px;background:var(--s2);border:1px solid var(--border)}
+.tb{background:rgba(108,99,255,.13);border-color:rgba(108,99,255,.28);color:#a89ff9}
+.t1{background:rgba(108,99,255,.1);border-color:rgba(108,99,255,.22);color:#a89ff9}
+.t2{background:rgba(249,202,36,.1);border-color:rgba(249,202,36,.22);color:var(--yellow)}
+.t3{background:rgba(67,233,123,.1);border-color:rgba(67,233,123,.22);color:var(--green)}
+.tru{background:rgba(255,101,132,.1);border-color:rgba(255,101,132,.22);color:var(--accent2)}
+.card-nums{display:flex;gap:20px;flex-shrink:0}
+.cn{text-align:right}
+.cn-v{font-size:17px;font-weight:700;line-height:1}
+.cn-l{font-family:var(--mono);font-size:9px;color:var(--muted);margin-top:2px}
+.kg{color:var(--green)}.ky{color:var(--yellow)}.kr{color:var(--red)}
+.card-arr{color:var(--muted);font-size:16px;flex-shrink:0;transition:transform .2s}
+.card-arr.open{transform:rotate(180deg)}
+.card-body{display:none;border-top:1px solid var(--border)}
+.card-body.open{display:block}
+.card-inner{padding:22px;display:grid;grid-template-columns:1fr 1fr;gap:20px}
+.met-row{grid-column:1/-1;display:grid;grid-template-columns:repeat(6,1fr);gap:8px}
+.met{background:var(--s2);border-radius:9px;padding:11px 13px;text-align:center}
+.met-v{font-size:16px;font-weight:700}
+.met-l{font-family:var(--mono);font-size:9px;color:var(--muted);margin-top:3px}
+.ib{}
+.ib-t{font-family:var(--mono);font-size:9px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);margin-bottom:8px;padding-bottom:5px;border-bottom:1px solid var(--border)}
+.ib-c{font-family:var(--mono);font-size:12px;line-height:1.7;color:var(--text)}
+.ib-c strong{color:var(--accent)}
+.dec{grid-column:1/-1;background:rgba(108,99,255,.07);border:1px solid rgba(108,99,255,.18);border-radius:11px;padding:14px 18px}
+.dec-t{font-family:var(--mono);font-size:9px;color:var(--accent);text-transform:uppercase;letter-spacing:1px;margin-bottom:10px}
+.dec-items{display:flex;flex-wrap:wrap;gap:7px}
+.dec-i{font-family:var(--mono);font-size:11px;padding:4px 11px;background:rgba(108,99,255,.13);border:1px solid rgba(108,99,255,.25);border-radius:5px;color:#c0b8ff}
+.ai-box{grid-column:1/-1;background:var(--s2);border-radius:11px;padding:18px 22px}
+.ai-box-t{font-family:var(--mono);font-size:9px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);margin-bottom:13px;display:flex;align-items:center;gap:7px}
+.ai-box-c{font-family:var(--mono);font-size:11px;line-height:1.8;color:#b0b0cc;white-space:pre-wrap;max-height:380px;overflow-y:auto}
+.empty{text-align:center;padding:80px 20px;color:var(--muted)}
+.empty-i{font-size:50px;margin-bottom:14px}
+.empty-t{font-size:20px;font-weight:700;margin-bottom:7px}
+.empty-s{font-family:var(--mono);font-size:12px;line-height:1.6}
+::-webkit-scrollbar{width:3px}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
+@media(max-width:860px){.sidebar{display:none}.kpi-strip{grid-template-columns:repeat(3,1fr)}.card-inner{grid-template-columns:1fr}.met-row{grid-template-columns:repeat(3,1fr)}}
 </style>
 </head>
 <body>
-<div class="wrap">
-
-  <header>
-    <div>
-      <div class="logo">BUYING <span>DASH</span></div>
-      <div class="logo-sub">Арбитражная команда · Weekly Report System</div>
-    </div>
-    <div class="header-right">
-      <div class="live-dot"></div>
-      <div class="last-update" id="lastUpdate">Загрузка...</div>
-    </div>
-  </header>
-
-  <div class="period-bar">
-    <button class="period-btn" onclick="setPeriod(1)">Сегодня</button>
-    <button class="period-btn active" onclick="setPeriod(7)">7 дней</button>
-    <button class="period-btn" onclick="setPeriod(14)">14 дней</button>
-    <button class="period-btn" onclick="setPeriod(30)">30 дней</button>
-    <button class="refresh-btn" onclick="loadData()">↻ Обновить</button>
+<div class="header">
+  <div><div class="logo">BUYING <span>DASH</span></div><div class="logo-sub">Арбитражная команда · Weekly Report System</div></div>
+  <div style="display:flex;align-items:center;gap:14px">
+    <div class="live"><div class="live-dot"></div><span id="upd">Загрузка...</span></div>
+    <button class="btn" onclick="loadData()">↻ Обновить</button>
   </div>
-
-  <div id="mainContent">
-    <div class="loading"><div class="spinner"></div>Загружаем данные...</div>
-  </div>
-
 </div>
-
+<div class="layout">
+  <div class="sidebar">
+    <div class="period-row">
+      <button class="pBtn" onclick="setPeriod(1,this)">1д</button>
+      <button class="pBtn active" onclick="setPeriod(7,this)">7д</button>
+      <button class="pBtn" onclick="setPeriod(14,this)">14д</button>
+      <button class="pBtn" onclick="setPeriod(30,this)">30д</button>
+    </div>
+    <div class="sb-section"><div class="sb-label">Баер</div><div id="fBuyer"></div></div>
+    <div class="sb-section"><div class="sb-label">Канал</div><div id="fChannel"></div></div>
+    <div class="sb-section"><div class="sb-label">Источник</div><div id="fSource"></div></div>
+    <div class="sb-section"><div class="sb-label">ТИР</div><div id="fTier"></div></div>
+  </div>
+  <div class="main" id="main"><div class="empty"><div class="empty-i">⏳</div><div class="empty-t">Загрузка...</div></div></div>
+</div>
 <script>
-let currentDays = 7;
-let allData = [];
-let charts = {};
+const SECRET="{{secret}}";
+let days=7,projects=[],filters={buyer:'all',channel:'all',source:'all',tier:'all'};
 
-const SECRET = "{{ secret }}";
+function pn(v){if(!v)return null;const n=parseFloat(String(v).replace(/[^0-9.,]/g,'').replace(',','.'));return isNaN(n)?null:n}
+function sd(a,b){return(a&&b&&b!==0)?a/b:null}
+function fm(v){return v==null?'—':(v>=1000?'$'+Math.round(v).toLocaleString('ru'):'$'+v.toFixed(2))}
+function fn(v){return v==null?'—':Math.round(v).toString()}
+function fp(v){return v==null?'—':v.toFixed(1)+'%'}
+function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
 
-function setPeriod(days) {
-  currentDays = days;
-  document.querySelectorAll('.period-btn').forEach(b => b.classList.remove('active'));
-  event.target.classList.add('active');
-  loadData();
+function kpiStatus(tier,cpa){
+  if(!cpa||!tier)return null;
+  const r={ТИР1:[300,600],ТИР2:[150,300],ТИР3:[80,150],РУ:[300,700]}[tier];
+  if(!r)return null;
+  if(cpa<=r[0])return{cls:'kg',lbl:'✓ Отлично'};
+  if(cpa<=r[1])return{cls:'ky',lbl:'~ Допустимо'};
+  return{cls:'kr',lbl:'✗ Дорого'};
 }
 
-async function loadData() {
-  try {
-    const res = await fetch(`/api/reports?days=${currentDays}&secret=${SECRET}`);
-    allData = await res.json();
-    render(allData);
-    document.getElementById('lastUpdate').textContent = 'Обновлено: ' + new Date().toLocaleTimeString('ru');
-  } catch(e) {
-    document.getElementById('mainContent').innerHTML = '<div class="empty"><div class="empty-icon">⚠️</div><div class="empty-title">Ошибка загрузки</div><div class="empty-sub">Проверьте подключение</div></div>';
-  }
-}
-
-function parseNum(v) {
-  if (!v) return null;
-  const n = parseFloat(String(v).replace(/[^0-9.]/g, ''));
-  return isNaN(n) ? null : n;
-}
-
-function safeDiv(a, b) { return (a && b && b !== 0) ? a / b : null; }
-function fmtMoney(v) { return v == null ? '—' : (Number.isInteger(v) ? '$'+v : '$'+v.toFixed(2)); }
-function fmtNum(v) { return v == null ? '—' : String(Math.round(v)); }
-
-function getKpiClass(tier, cpa) {
-  if (!cpa || !tier) return '';
-  const rules = { 'ТИР1':[300,600], 'ТИР2':[150,300], 'ТИР3':[80,150], 'РУ':[300,700] };
-  const r = rules[tier];
-  if (!r) return '';
-  if (cpa <= r[0]) return 'kpi-g';
-  if (cpa <= r[1]) return 'kpi-y';
-  return 'kpi-r';
-}
-
-function getKpiLabel(tier, cpa) {
-  if (!cpa || !tier) return '—';
-  const rules = { 'ТИР1':[300,600], 'ТИР2':[150,300], 'ТИР3':[80,150], 'РУ':[300,700] };
-  const r = rules[tier];
-  if (!r) return '—';
-  if (cpa <= r[0]) return '✓ ОТЛИЧНО';
-  if (cpa <= r[1]) return '~ ДОПУСТИМО';
-  return '✗ ДОРОГО';
-}
-
-function extractProjects(reports) {
-  const projects = [];
-  for (const r of reports) {
-    const buyer = r.buyer_name || '?';
-    const state = r.state || {};
-    const items = state.reports || r.channels || [];
-    for (const item of items) {
-      const a = item.answers || {};
-      const spend = parseNum(a.spend);
-      const ftd = parseNum(a.ftd);
-      const dialogs = parseNum(a.dialogs);
-      const regs = parseNum(a.regs);
-      const cpa = safeDiv(spend, ftd);
-      projects.push({
-        buyer, date: (r.created_at||'').slice(0,10),
-        channel: item.channel||'?',
-        source: item.source||'?',
-        crm: item.crm||'?',
-        tier: item.tier||'?',
-        spend, ftd, dialogs, regs, cpa,
-        decision: a.decision||'—',
-        verdict: r.ai_verdict || extractVerdict(r.ai_report||''),
-        quality: extractQuality(r.ai_report||''),
-      });
-    }
-    // fallback: if no state.reports, try to parse from raw_report text
-  }
-  return projects;
-}
-
-function extractVerdict(text) {
-  if (!text) return '';
-  if (text.includes('МАСШТАБИРОВАТЬ')) return 'МАСШТАБИРОВАТЬ';
-  if (text.includes('СНИЗИТЬ БЮДЖЕТ')) return 'СНИЗИТЬ БЮДЖЕТ';
-  if (text.includes('ТЕСТОВЫЙ')) return 'ТЕСТОВЫЙ';
-  if (text.includes('ПАУЗА') || text.includes('СТОП')) return 'ПАУЗА';
-  if (text.includes('ОСТАВИТЬ')) return 'ОСТАВИТЬ';
-  return '';
-}
-
-function extractQuality(text) {
-  if (!text) return null;
-  const m = text.match(/Оценка[:\s]+(\d+)\s*\/\s*10/i);
-  return m ? parseInt(m[1]) : null;
-}
-
-function verdictClass(v) {
-  if (!v) return '';
-  if (v.includes('МАСШ')) return 'v-scale';
-  if (v.includes('СНИЗИТЬ')) return 'v-cut';
-  if (v.includes('ТЕСТ')) return 'v-test';
-  if (v.includes('ПАУЗА') || v.includes('СТОП')) return 'v-pause';
+function vClass(t){
+  if(!t)return 'v-keep';
+  if(t.includes('МАСШТАБ'))return 'v-scale';
+  if(t.includes('СНИЗИТЬ'))return 'v-cut';
+  if(t.includes('ТЕСТОВ')||t.includes('ТЕСТОВЫЙ'))return 'v-test';
+  if(t.includes('ПАУЗА')||t.includes('СТОП'))return 'v-pause';
   return 'v-keep';
 }
 
-function tierClass(t) {
-  const map = {'ТИР1':'tag-t1','ТИР2':'tag-t2','ТИР3':'tag-t3','РУ':'tag-ru'};
-  return map[t] || '';
+function tClass(t){return{ТИР1:'t1',ТИР2:'t2',ТИР3:'t3',РУ:'tru'}[t]||''}
+
+function extractVerdict(txt){
+  if(!txt)return'';
+  const m=txt.match(/AI-вердикт[:\s]+([^\n]+)/);
+  return m?m[1].trim():'';
+}
+function extractQuality(txt){
+  if(!txt)return null;
+  const m=txt.match(/Оценка[:\s]+(\d+)\s*\/\s*10/i);
+  return m?parseInt(m[1]):null;
+}
+function extractFlags(txt){
+  if(!txt)return[];
+  const m=txt.match(/ПРОТИВОРЕЧИЯ[^\n]*\n([\s\S]*?)(?:━━━|ОЦЕНКА|$)/);
+  if(!m)return[];
+  const sec=m[1];
+  if(sec.includes('Явных противоречий нет'))return[];
+  return sec.split('\n').filter(l=>l.trim().startsWith('-')).map(l=>l.replace(/^-\s*/,'').trim()).filter(Boolean);
+}
+function extractDecisions(txt){
+  if(!txt)return[];
+  const m=txt.match(/РЕШЕНИЯ РУКОВОДИТЕЛЯ[^\n]*\n([\s\S]*?)(?:━━━|$)/);
+  if(!m)return[];
+  return m[1].split('\n').filter(l=>l.trim().startsWith('-')).map(l=>l.replace(/^-\s*/,'').trim()).filter(Boolean);
 }
 
-function render(reports) {
-  if (!reports || reports.length === 0) {
-    document.getElementById('mainContent').innerHTML = `
-      <div class="empty">
-        <div class="empty-icon">📭</div>
-        <div class="empty-title">Отчетов пока нет</div>
-        <div class="empty-sub">Отчеты появятся после того как баеры заполнят их в Telegram-боте</div>
-      </div>`;
+function parseReports(reports){
+  const out=[];
+  for(const r of reports){
+    const buyer=r.buyer_name||'?';
+    const ai=r.ai_report||'';
+    const verdict=extractVerdict(ai);
+    const quality=extractQuality(ai);
+    const flags=extractFlags(ai);
+    const decisions=extractDecisions(ai);
+    const state=r.state||{};
+    const items=state.reports||r.channels||[];
+    for(const item of items){
+      const a=item.answers||{};
+      const spend=pn(a.spend),ftd=pn(a.ftd),dialogs=pn(a.dialogs),regs=pn(a.regs);
+      const cpa=sd(spend,ftd),cpl=sd(spend,dialogs),cpr=sd(spend,regs);
+      const d2r=sd(regs,dialogs),r2f=sd(ftd,regs);
+      out.push({buyer,date:(r.created_at||'').slice(0,10),
+        channel:item.channel||'?',source:item.source||'?',crm:item.crm||'?',tier:item.tier||'?',
+        spend,ftd,dialogs,regs,cpa,cpl,cpr,d2r,r2f,
+        verdict,quality,flags,decisions,ai,
+        work_done:a.work_done||'',tests:a.tests||'',
+        worked_best:a.worked_best||'',worked_metrics:a.worked_metrics||'',
+        stop_continue:a.stop_continue||'',main_problem:a.main_problem||'',
+        blocker:a.blocker||'',dynamic:a.dynamic||'',dynamic_reason:a.dynamic_reason||'',
+        budget_action:a.budget_action||'',budget_reason:a.budget_reason||'',
+        next_plan:a.next_plan||'',success_criteria:a.success_criteria||'',
+        needs:a.needs||'',main_focus:a.main_focus||''});
+    }
+  }
+  return out;
+}
+
+function buildFilters(ps){
+  const u=arr=>[...new Set(arr.filter(Boolean))].sort();
+  const buyers=u(ps.map(p=>p.buyer)),channels=u(ps.map(p=>p.channel));
+  const sources=u(ps.map(p=>p.source)),tiers=u(ps.map(p=>p.tier));
+  function render(id,items,key){
+    const el=document.getElementById(id);
+    const all=`<button class="fBtn active" onclick="setF('${key}','all',this)">Все <span class="fCnt">${items.length}</span></button>`;
+    el.innerHTML=all+items.map(v=>`<button class="fBtn" onclick="setF('${key}','${v}',this)">${v}</button>`).join('');
+  }
+  render('fBuyer',buyers,'buyer');render('fChannel',channels,'channel');
+  render('fSource',sources,'source');render('fTier',tiers,'tier');
+}
+
+function setF(key,val,btn){
+  filters[key]=val;
+  btn.parentElement.querySelectorAll('.fBtn').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  render();
+}
+
+function filtered(){
+  return projects.filter(p=>{
+    if(filters.buyer!=='all'&&p.buyer!==filters.buyer)return false;
+    if(filters.channel!=='all'&&p.channel!==filters.channel)return false;
+    if(filters.source!=='all'&&p.source!==filters.source)return false;
+    if(filters.tier!=='all'&&p.tier!==filters.tier)return false;
+    return true;
+  });
+}
+
+function toggle(i){
+  document.getElementById('b'+i).classList.toggle('open');
+  document.getElementById('a'+i).classList.toggle('open');
+}
+
+function renderCard(p,i){
+  const kpi=kpiStatus(p.tier,p.cpa);
+  const vc=vClass(p.verdict);
+  const vl=p.verdict||p.decisions[0]||'Нет вердикта';
+  const decs=p.decisions.length?p.decisions.map(d=>`<div class="dec-i">${esc(d)}</div>`).join(''):'<div class="dec-i" style="color:var(--muted)">Нет данных</div>';
+  const aiBox=p.ai?`<div class="ai-box"><div class="ai-box-t">🤖 Полный AI-разбор</div><div class="ai-box-c">${esc(p.ai)}</div></div>`:'';
+  const qColor=p.quality?(p.quality>=7?'var(--green)':p.quality>=5?'var(--yellow)':'var(--red)'):'';
+
+  return`<div class="card">
+  <div class="card-hdr" onclick="toggle(${i})">
+    <span class="verdict ${vc}">${esc(vl)}</span>
+    <div class="card-meta">
+      <div class="card-name">${esc(p.channel)}</div>
+      <div class="card-tags">
+        <span class="tag tb">${esc(p.buyer)}</span>
+        <span class="tag">${esc(p.source)}</span>
+        <span class="tag">${esc(p.crm)}</span>
+        <span class="tag ${tClass(p.tier)}">${esc(p.tier)}</span>
+        ${p.date?`<span class="tag">${p.date}</span>`:''}
+      </div>
+    </div>
+    <div class="card-nums">
+      <div class="cn"><div class="cn-v">${fm(p.spend)}</div><div class="cn-l">Spend</div></div>
+      <div class="cn"><div class="cn-v">${fn(p.ftd)}</div><div class="cn-l">FTD</div></div>
+      <div class="cn"><div class="cn-v ${kpi?kpi.cls:''}">${fm(p.cpa)}</div><div class="cn-l">CPA FTD${kpi?' · '+kpi.lbl:''}</div></div>
+      ${p.quality?`<div class="cn"><div class="cn-v" style="color:${qColor}">${p.quality}/10</div><div class="cn-l">Отчет</div></div>`:''}
+    </div>
+    <div class="card-arr" id="a${i}">▾</div>
+  </div>
+  <div class="card-body" id="b${i}">
+    <div class="card-inner">
+      <div class="met-row">
+        <div class="met"><div class="met-v">${fn(p.dialogs)}</div><div class="met-l">Диалоги</div></div>
+        <div class="met"><div class="met-v">${fn(p.regs)}</div><div class="met-l">Регистрации</div></div>
+        <div class="met"><div class="met-v">${fm(p.cpl)}</div><div class="met-l">Цена диалога</div></div>
+        <div class="met"><div class="met-v">${fm(p.cpr)}</div><div class="met-l">Цена реги</div></div>
+        <div class="met"><div class="met-v">${p.d2r?fp(p.d2r*100):'—'}</div><div class="met-l">Диалог→Рега</div></div>
+        <div class="met"><div class="met-v">${p.r2f?fp(p.r2f*100):'—'}</div><div class="met-l">Рега→FTD</div></div>
+      </div>
+      <div class="ib"><div class="ib-t">Что делали</div><div class="ib-c">${esc(p.work_done)||'—'}</div></div>
+      <div class="ib"><div class="ib-t">Что тестировали</div><div class="ib-c">${esc(p.tests)||'—'}</div></div>
+      <div class="ib"><div class="ib-t">Что сработало</div><div class="ib-c">${esc(p.worked_best)||'—'}</div></div>
+      <div class="ib"><div class="ib-t">Доказательство цифрами</div><div class="ib-c">${esc(p.worked_metrics)||'—'}</div></div>
+      <div class="ib"><div class="ib-t">Главная проблема / Что мешает</div><div class="ib-c">${esc(p.main_problem)||'—'} · ${esc(p.blocker)||'—'}</div></div>
+      <div class="ib"><div class="ib-t">Динамика</div><div class="ib-c">${esc(p.dynamic)||'—'}: ${esc(p.dynamic_reason)||'—'}</div></div>
+      <div class="ib"><div class="ib-t">План на следующий период</div><div class="ib-c">${esc(p.next_plan)||'—'}</div></div>
+      <div class="ib"><div class="ib-t">Критерий успеха</div><div class="ib-c">${esc(p.success_criteria)||'не указан'}</div></div>
+      <div class="ib"><div class="ib-t">Бюджет</div><div class="ib-c">${esc(p.budget_action)||'—'}: ${esc(p.budget_reason)||'—'}</div></div>
+      <div class="ib"><div class="ib-t">Нужно от руководителя</div><div class="ib-c">${esc(p.needs)||'—'}</div></div>
+      <div class="dec"><div class="dec-t">✓ Решения руководителя (AI)</div><div class="dec-items">${decs}</div></div>
+      ${aiBox}
+    </div>
+  </div>
+</div>`;
+}
+
+function render(){
+  const ps=filtered();
+  const main=document.getElementById('main');
+  if(!ps.length){
+    main.innerHTML='<div class="empty"><div class="empty-i">📭</div><div class="empty-t">Нет отчетов</div><div class="empty-s">Измени фильтры или период.<br>Отчеты появятся после заполнения в боте.</div></div>';
     return;
   }
-
-  const projects = extractProjects(reports);
-  const buyers = [...new Set(reports.map(r => r.buyer_name).filter(Boolean))];
-  const totalSpend = projects.reduce((s,p) => s + (p.spend||0), 0);
-  const totalFtd = projects.reduce((s,p) => s + (p.ftd||0), 0);
-  const avgCpa = safeDiv(totalSpend, totalFtd);
-  const totalDialogs = projects.reduce((s,p) => s + (p.dialogs||0), 0);
-
-  // Destroy old charts
-  Object.values(charts).forEach(c => c.destroy());
-  charts = {};
-
-  // Spend by buyer
-  const spendByBuyer = {};
-  for (const p of projects) {
-    spendByBuyer[p.buyer] = (spendByBuyer[p.buyer]||0) + (p.spend||0);
-  }
-
-  // FTD by channel
-  const ftdByChannel = {};
-  for (const p of projects) {
-    ftdByChannel[p.channel] = (ftdByChannel[p.channel]||0) + (p.ftd||0);
-  }
-
-  // CPA by tier
-  const tierData = {};
-  for (const p of projects) {
-    if (!tierData[p.tier]) tierData[p.tier] = {spend:0, ftd:0};
-    tierData[p.tier].spend += (p.spend||0);
-    tierData[p.tier].ftd += (p.ftd||0);
-  }
-
-  // Build buyer cards
-  let buyerCardsHtml = '';
-  for (const buyer of buyers) {
-    const bp = projects.filter(p => p.buyer === buyer);
-    const bSpend = bp.reduce((s,p)=>s+(p.spend||0),0);
-    const bFtd = bp.reduce((s,p)=>s+(p.ftd||0),0);
-    const bCpa = safeDiv(bSpend, bFtd);
-    const bReports = reports.filter(r => r.buyer_name === buyer);
-    const qualities = bReports.map(r => extractQuality(r.ai_report||'')).filter(q=>q);
-    const avgQ = qualities.length ? Math.round(qualities.reduce((a,b)=>a+b,0)/qualities.length) : null;
-    const scoreClass = avgQ == null ? '' : avgQ >= 7 ? 'score-good' : avgQ >= 5 ? 'score-ok' : 'score-bad';
-
-    let channelsHtml = '';
-    for (const p of bp) {
-      const kc = getKpiClass(p.tier, p.cpa);
-      const kl = getKpiLabel(p.tier, p.cpa);
-      channelsHtml += `
-        <div class="buyer-channel-row">
-          <span class="ch-name">${p.channel} / ${p.source}</span>
-          <span class="ch-kpi ${kc}">${kl} ${p.cpa ? fmtMoney(p.cpa) : ''}</span>
-        </div>`;
-    }
-
-    buyerCardsHtml += `
-      <div class="buyer-card">
-        <div class="buyer-header">
-          <div class="buyer-name">${buyer}</div>
-          ${avgQ ? `<span class="buyer-score ${scoreClass}">${avgQ}/10</span>` : ''}
-        </div>
-        <div class="buyer-stats">
-          <div class="buyer-stat">
-            <div class="buyer-stat-val">${fmtMoney(bSpend)}</div>
-            <div class="buyer-stat-label">Spend</div>
-          </div>
-          <div class="buyer-stat">
-            <div class="buyer-stat-val">${fmtNum(bFtd)}</div>
-            <div class="buyer-stat-label">FTD</div>
-          </div>
-          <div class="buyer-stat">
-            <div class="buyer-stat-val">${fmtMoney(bCpa)}</div>
-            <div class="buyer-stat-label">CPA FTD</div>
-          </div>
-        </div>
-        <div class="buyer-channels">${channelsHtml || '<div style="color:var(--muted);font-family:var(--mono);font-size:11px;padding:8px 0">Нет проектов</div>'}</div>
-      </div>`;
-  }
-
-  // Build table rows
-  let tableRows = '';
-  for (const p of projects) {
-    const kc = getKpiClass(p.tier, p.cpa);
-    const kl = getKpiLabel(p.tier, p.cpa);
-    const vc = verdictClass(p.verdict);
-    tableRows += `
-      <tr data-buyer="${p.buyer}">
-        <td><span class="tag tag-buyer">${p.buyer}</span></td>
-        <td>${p.channel}</td>
-        <td><span class="tag">${p.source}</span></td>
-        <td><span class="tag">${p.crm}</span></td>
-        <td><span class="tag ${tierClass(p.tier)}">${p.tier}</span></td>
-        <td class="num">${p.spend ? fmtMoney(p.spend) : '—'}</td>
-        <td class="num">${fmtNum(p.ftd)}</td>
-        <td class="num">${fmtMoney(p.cpa)}</td>
-        <td><span class="${kc}">${kl}</span></td>
-        ${p.verdict ? `<td><span class="verdict ${vc}">${p.verdict}</span></td>` : '<td>—</td>'}
-        <td class="date-cell">${p.date}</td>
-      </tr>`;
-  }
-
-  // Filter buttons
-  const filterBtns = ['Все', ...buyers].map((b,i) =>
-    `<button class="tfilter ${i===0?'active':''}" onclick="filterRows('${b}',this)">${b}</button>`
-  ).join('');
-
-  document.getElementById('mainContent').innerHTML = `
-    <div class="kpi-strip">
-      <div class="kpi-card" style="--accent-color:var(--accent)">
-        <div class="kpi-label">Отчетов</div>
-        <div class="kpi-value">${reports.length}</div>
-        <div class="kpi-sub">за ${currentDays} дней</div>
-      </div>
-      <div class="kpi-card" style="--accent-color:var(--accent2)">
-        <div class="kpi-label">Проектов</div>
-        <div class="kpi-value">${projects.length}</div>
-        <div class="kpi-sub">каналов заполнено</div>
-      </div>
-      <div class="kpi-card" style="--accent-color:var(--accent3)">
-        <div class="kpi-label">Баеров</div>
-        <div class="kpi-value">${buyers.length}</div>
-        <div class="kpi-sub">${buyers.join(', ')}</div>
-      </div>
-      <div class="kpi-card" style="--accent-color:var(--yellow)">
-        <div class="kpi-label">Total Spend</div>
-        <div class="kpi-value">${fmtMoney(totalSpend)}</div>
-        <div class="kpi-sub">суммарно</div>
-      </div>
-      <div class="kpi-card" style="--accent-color:var(--accent3)">
-        <div class="kpi-label">Total FTD</div>
-        <div class="kpi-value">${fmtNum(totalFtd)}</div>
-        <div class="kpi-sub">конверсий</div>
-      </div>
-      <div class="kpi-card" style="--accent-color:var(--accent2)">
-        <div class="kpi-label">Avg CPA FTD</div>
-        <div class="kpi-value">${fmtMoney(avgCpa)}</div>
-        <div class="kpi-sub">средняя цена</div>
-      </div>
-    </div>
-
-    <div class="charts-row">
-      <div class="chart-card">
-        <div class="chart-title">Spend по баерам</div>
-        <div class="chart-wrap"><canvas id="chartBuyer"></canvas></div>
-      </div>
-      <div class="chart-card">
-        <div class="chart-title">FTD по каналам</div>
-        <div class="chart-wrap"><canvas id="chartChannel"></canvas></div>
-      </div>
-      <div class="chart-card">
-        <div class="chart-title">CPA FTD по ТИРам</div>
-        <div class="chart-wrap"><canvas id="chartTier"></canvas></div>
-      </div>
-    </div>
-
-    <div class="section-header">
-      <div class="section-title">По баерам</div>
-      <div class="section-line"></div>
-      <div class="section-count">${buyers.length} баеров</div>
-    </div>
-    <div class="buyers-grid">${buyerCardsHtml}</div>
-
-    <div class="section-header">
-      <div class="section-title">Все проекты</div>
-      <div class="section-line"></div>
-      <div class="section-count">${projects.length} проектов</div>
-    </div>
-    <div class="table-wrap">
-      <div class="table-filters">${filterBtns}</div>
-      <table>
-        <thead>
-          <tr>
-            <th>Баер</th><th>Канал</th><th>Источник</th><th>CRM</th><th>ТИР</th>
-            <th>Spend</th><th>FTD</th><th>CPA FTD</th><th>KPI</th><th>AI-вердикт</th><th>Дата</th>
-          </tr>
-        </thead>
-        <tbody id="tableBody">${tableRows}</tbody>
-      </table>
-    </div>
-  `;
-
-  // Charts
-  const chartDefaults = {
-    responsive:true, maintainAspectRatio:false,
-    plugins:{ legend:{ display:false } },
-  };
-  const gridColor = 'rgba(255,255,255,0.05)';
-  const tickColor = '#5a5a7a';
-
-  charts.buyer = new Chart(document.getElementById('chartBuyer'), {
-    type:'bar',
-    data:{
-      labels: Object.keys(spendByBuyer),
-      datasets:[{ data: Object.values(spendByBuyer), backgroundColor:'rgba(108,99,255,0.7)', borderRadius:6 }]
-    },
-    options:{...chartDefaults, scales:{
-      x:{ticks:{color:tickColor,font:{family:'DM Mono',size:10}},grid:{color:gridColor}},
-      y:{ticks:{color:tickColor,font:{family:'DM Mono',size:10}},grid:{color:gridColor}}
-    }}
-  });
-
-  charts.channel = new Chart(document.getElementById('chartChannel'), {
-    type:'doughnut',
-    data:{
-      labels: Object.keys(ftdByChannel),
-      datasets:[{ data: Object.values(ftdByChannel),
-        backgroundColor:['rgba(67,233,123,0.8)','rgba(108,99,255,0.8)','rgba(255,101,132,0.8)','rgba(249,202,36,0.8)','rgba(100,200,255,0.8)','rgba(255,160,100,0.8)'],
-        borderWidth:0 }]
-    },
-    options:{...chartDefaults, plugins:{legend:{display:true, position:'right', labels:{color:tickColor,font:{family:'DM Mono',size:10},boxWidth:10}}}}
-  });
-
-  const tierLabels = Object.keys(tierData);
-  const tierCpas = tierLabels.map(t => safeDiv(tierData[t].spend, tierData[t].ftd) || 0);
-  charts.tier = new Chart(document.getElementById('chartTier'), {
-    type:'bar',
-    data:{
-      labels: tierLabels,
-      datasets:[{ data: tierCpas, backgroundColor:'rgba(255,101,132,0.7)', borderRadius:6 }]
-    },
-    options:{...chartDefaults, scales:{
-      x:{ticks:{color:tickColor,font:{family:'DM Mono',size:10}},grid:{color:gridColor}},
-      y:{ticks:{color:tickColor,font:{family:'DM Mono',size:10},callback:v=>'$'+v},grid:{color:gridColor}}
-    }}
-  });
+  const totalS=ps.reduce((s,p)=>s+(p.spend||0),0);
+  const totalF=ps.reduce((s,p)=>s+(p.ftd||0),0);
+  const totalD=ps.reduce((s,p)=>s+(p.dialogs||0),0);
+  const avgCpa=sd(totalS,totalF);
+  const buyers=[...new Set(ps.map(p=>p.buyer))];
+  const allFlags=ps.flatMap(p=>p.flags.map(f=>`${p.buyer} / ${p.channel}: ${f}`));
+  const flagsHtml=allFlags.length
+    ?`<div class="flags on"><div class="flags-t">🚨 Красные флаги и противоречия</div>${allFlags.map(f=>`<div class="flag-i">⚠ ${esc(f)}</div>`).join('')}</div>`
+    :'';
+  const cards=ps.map((p,i)=>renderCard(p,i)).join('');
+  main.innerHTML=`
+<div class="kpi-strip">
+  <div class="kpi-card" style="--c:var(--accent)"><div class="kpi-l">Проектов</div><div class="kpi-v">${ps.length}</div><div class="kpi-s">${buyers.length} баеров</div></div>
+  <div class="kpi-card" style="--c:var(--yellow)"><div class="kpi-l">Total Spend</div><div class="kpi-v">${fm(totalS)}</div><div class="kpi-s">за период</div></div>
+  <div class="kpi-card" style="--c:var(--green)"><div class="kpi-l">Total FTD</div><div class="kpi-v">${fn(totalF)}</div><div class="kpi-s">конверсий</div></div>
+  <div class="kpi-card" style="--c:var(--accent2)"><div class="kpi-l">Avg CPA FTD</div><div class="kpi-v">${fm(avgCpa)}</div><div class="kpi-s">средняя цена</div></div>
+  <div class="kpi-card" style="--c:var(--blue)"><div class="kpi-l">Диалогов</div><div class="kpi-v">${fn(totalD)}</div><div class="kpi-s">суммарно</div></div>
+</div>
+${flagsHtml}
+<div class="sec-hdr"><div class="sec-t">Проекты</div><div class="sec-l"></div><div class="sec-c">${ps.length} проектов</div></div>
+<div class="cards">${cards}</div>`;
 }
 
-function filterRows(buyer, btn) {
-  document.querySelectorAll('.tfilter').forEach(b=>b.classList.remove('active'));
+function setPeriod(d,btn){
+  days=d;
+  document.querySelectorAll('.pBtn').forEach(b=>b.classList.remove('active'));
   btn.classList.add('active');
-  document.querySelectorAll('#tableBody tr').forEach(row => {
-    row.style.display = (buyer==='Все' || row.dataset.buyer===buyer) ? '' : 'none';
-  });
+  loadData();
 }
 
-// Auto-refresh every 60 seconds
-setInterval(loadData, 60000);
+async function loadData(){
+  try{
+    const res=await fetch(`/api/reports?days=${days}&secret=${SECRET}`);
+    const data=await res.json();
+    projects=parseReports(data);
+    buildFilters(projects);
+    render();
+    document.getElementById('upd').textContent=new Date().toLocaleTimeString('ru');
+  }catch(e){
+    document.getElementById('main').innerHTML='<div class="empty"><div class="empty-i">⚠️</div><div class="empty-t">Ошибка загрузки</div></div>';
+  }
+}
+
+setInterval(loadData,60000);
 loadData();
 </script>
 </body>
-</html>
-"""
+</html>"""
 
 @app.route("/")
 def dashboard():
-    secret = API_SECRET
-    return render_template_string(DASHBOARD_HTML, secret=secret)
+    return render_template_string(HTML, secret=API_SECRET)
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 5000))
